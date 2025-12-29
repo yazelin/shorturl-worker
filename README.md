@@ -26,11 +26,73 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-## 首次設定（已完成）
+## 首次設定
 
-1. 註冊 Cloudflare：https://dash.cloudflare.com/sign-up
-2. 建立 KV：`npx wrangler kv:namespace create "URLS"`
-3. 更新 `wrangler.toml` 的 KV id
+如果要從零開始建立此專案，請依照以下步驟：
+
+### 1. 註冊 Cloudflare（免費）
+
+前往 https://dash.cloudflare.com/sign-up 註冊帳號
+
+### 2. 安裝相依套件
+
+```bash
+cd shorturl-worker
+npm install
+```
+
+### 3. 登入 Cloudflare
+
+```bash
+npx wrangler login
+```
+
+會開啟瀏覽器進行授權。
+
+### 4. 建立 KV 儲存空間
+
+```bash
+npx wrangler kv:namespace create "URLS"
+```
+
+會輸出類似：
+```
+{ binding = "URLS", id = "abc123xxxxxxxxx" }
+```
+
+### 5. 更新設定
+
+編輯 `wrangler.toml`，把 id 換成上一步取得的值：
+
+```toml
+[[kv_namespaces]]
+binding = "URLS"
+id = "abc123xxxxxxxxx"  # <-- 換成你的 id
+```
+
+### 6. 本機測試
+
+```bash
+npm run dev
+```
+
+### 7. 部署到 Cloudflare
+
+```bash
+npx wrangler deploy
+```
+
+部署成功後會顯示 Worker URL，例如：
+```
+https://shorturl.your-subdomain.workers.dev
+```
+
+### 8. 設定 GitHub Actions 自動部署（選用）
+
+1. 前往 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 建立 Token
+   - 使用「Edit Cloudflare Workers」範本
+2. 在 GitHub Repo → Settings → Secrets and variables → Actions
+3. 新增 Secret：`CLOUDFLARE_API_TOKEN`
 
 ## API 說明
 
