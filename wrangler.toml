@@ -1,0 +1,11 @@
+name = "shorturl"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# KV namespace - 部署前需要先執行:
+# wrangler kv:namespace create "URLS"
+# 然後把得到的 id 填入下方
+
+[[kv_namespaces]]
+binding = "URLS"
+id = "9dd6a1acb4544aba8e95bdbdc41cc1c4"
