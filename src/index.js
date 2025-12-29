@@ -17,6 +17,44 @@ const ALLOWED_ORIGINS = [
 // PromptFill 網址
 const PROMPTFILL_URL = 'https://yazelin.github.io/PromptFill/';
 
+// ====== Rate Limiting（記憶體方案）======
+const RATE_LIMIT = 10;          // 每個 IP 在時間窗口內最多請求次數
+const RATE_WINDOW_MS = 60000;   // 時間窗口：60 秒
+const rateLimitMap = new Map();
+
+/**
+ * 檢查是否超過請求限制
+ */
+function checkRateLimit(ip) {
+  const now = Date.now();
+
+  // 定期清理過期記錄（約 1% 機率）
+  if (Math.random() < 0.01) {
+    for (const [key, val] of rateLimitMap) {
+      if (now - val.start > RATE_WINDOW_MS) {
+        rateLimitMap.delete(key);
+      }
+    }
+  }
+
+  const record = rateLimitMap.get(ip);
+
+  // 新 IP 或已過期，重置計數
+  if (!record || now - record.start > RATE_WINDOW_MS) {
+    rateLimitMap.set(ip, { start: now, count: 1 });
+    return true;
+  }
+
+  // 超過限制
+  if (record.count >= RATE_LIMIT) {
+    return false;
+  }
+
+  // 增加計數
+  record.count++;
+  return true;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -89,6 +127,12 @@ function handleCORS(origin) {
  * 建立短網址 - 存儲完整模板資料
  */
 async function handleCreateShortUrl(request, env, url, origin) {
+  // Rate Limiting 檢查
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return jsonResponse({ error: 'Too many requests. Please try again later.' }, 429, origin);
+  }
+
   try {
     const body = await request.json();
 
