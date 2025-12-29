@@ -6,6 +6,7 @@
  * API:
  *   POST /api/short-url      - 建立短網址（存儲模板資料）
  *   GET  /api/template/:code - 取得模板資料
+ *   GET  /api/proxy?url=...  - CORS 圖片代理
  *   GET  /s/:code            - 重定向到 PromptFill
  */
 
@@ -78,6 +79,14 @@ export default {
       return handleGetTemplate(request, env, url, origin);
     }
 
+    // GET /api/proxy?url=... - CORS 圖片代理
+    if (request.method === 'GET' && url.pathname === '/api/proxy') {
+      if (!isAllowedOrigin(origin)) {
+        return new Response('Forbidden: Origin not allowed', { status: 403 });
+      }
+      return handleProxy(request, url, origin);
+    }
+
     // GET /s/:code - 重定向到 PromptFill
     if (url.pathname.startsWith('/s/')) {
       return handleRedirect(request, env, url);
@@ -91,6 +100,7 @@ export default {
         endpoints: {
           create: 'POST /api/short-url',
           getTemplate: 'GET /api/template/:code',
+          proxy: 'GET /api/proxy?url=...',
           redirect: 'GET /s/:code'
         }
       }, 200, origin);
@@ -229,6 +239,56 @@ async function handleRedirect(request, env, url) {
   // 重定向到 PromptFill，帶上 id 參數
   const redirectUrl = `${PROMPTFILL_URL}?id=${code}`;
   return Response.redirect(redirectUrl, 302);
+}
+
+/**
+ * CORS 圖片代理 - 繞過跨域限制
+ */
+async function handleProxy(request, url, origin) {
+  const targetUrl = url.searchParams.get('url');
+
+  if (!targetUrl) {
+    return new Response('Missing url parameter', { status: 400 });
+  }
+
+  // 驗證是否為有效的 URL
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(targetUrl);
+  } catch {
+    return new Response('Invalid URL', { status: 400 });
+  }
+
+  // 只允許 http/https 協議
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    return new Response('Only HTTP/HTTPS URLs are allowed', { status: 400 });
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'PromptFill-Proxy/1.0',
+      },
+    });
+
+    if (!response.ok) {
+      return new Response(`Upstream error: ${response.status}`, { status: response.status });
+    }
+
+    const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': origin,
+        'Cache-Control': 'public, max-age=86400', // 快取 1 天
+      },
+    });
+  } catch (err) {
+    console.error('Proxy fetch error:', err);
+    return new Response('Failed to fetch resource', { status: 502 });
+  }
 }
 
 /**
