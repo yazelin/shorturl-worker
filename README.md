@@ -2,64 +2,35 @@
 
 PromptFill 短網址服務 - 使用 Cloudflare Workers + KV
 
-## 部署步驟
+## 功能
 
-### 1. 註冊 Cloudflare（免費）
+- 建立短網址，存儲完整模板 JSON
+- 短網址重新導向到 PromptFill
+- Rate Limiting 防護（每 IP 每分鐘 10 次）
+- GitHub Actions 自動部署
 
-前往 https://dash.cloudflare.com/sign-up 註冊帳號
+## 部署方式
 
-### 2. 安裝相依套件
+### 自動部署（目前使用）
+
+Push 到 `main` 分支會自動透過 GitHub Actions 部署。
+
+需要設定 GitHub Secret：
+- `CLOUDFLARE_API_TOKEN`：從 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 建立
+
+### 手動部署
 
 ```bash
-cd shorturl-worker
 npm install
-```
-
-### 3. 登入 Cloudflare
-
-```bash
 npx wrangler login
+npx wrangler deploy
 ```
 
-會開啟瀏覽器讓你授權。
+## 首次設定（已完成）
 
-### 4. 建立 KV 儲存空間
-
-```bash
-npx wrangler kv:namespace create "URLS"
-```
-
-會輸出類似：
-```
-{ binding = "URLS", id = "abc123xxxxxxxxx" }
-```
-
-### 5. 更新設定
-
-編輯 `wrangler.toml`，把 id 換成上一步取得的值：
-
-```toml
-[[kv_namespaces]]
-binding = "URLS"
-id = "abc123xxxxxxxxx"  # <-- 換成你的 id
-```
-
-### 6. 本機測試
-
-```bash
-npm run dev
-```
-
-### 7. 部署到 Cloudflare
-
-```bash
-npm run deploy
-```
-
-部署成功後會顯示 Worker URL：
-```
-https://shorturl.your-account.workers.dev
-```
+1. 註冊 Cloudflare：https://dash.cloudflare.com/sign-up
+2. 建立 KV：`npx wrangler kv:namespace create "URLS"`
+3. 更新 `wrangler.toml` 的 KV id
 
 ## API 說明
 
@@ -82,7 +53,7 @@ Content-Type: application/json
 回應：
 ```json
 {
-  "shortUrl": "https://shorturl.xxx.workers.dev/s/abc123",
+  "shortUrl": "https://shorturl.yazelinj303.workers.dev/s/abc123",
   "code": "abc123",
   "expiresIn": "1 year"
 }
@@ -108,12 +79,7 @@ Cloudflare Workers 免費方案：
 - **KV 讀取**：每天 100,000 次
 - **KV 寫入**：每天 1,000 次
 
-個人使用完全足夠！
+## 安全機制
 
-## 自訂網域（選用）
-
-如果你有自己的網域，可以在 Cloudflare Dashboard 設定：
-
-1. Workers & Pages → 你的 Worker → Settings → Triggers
-2. Add Custom Domain
-3. 輸入你的網域（如 `s.yourdomain.com`）
+- **Origin 白名單**：僅允許 `yazelin.github.io`
+- **Rate Limiting**：每 IP 每 60 秒最多 10 次請求
