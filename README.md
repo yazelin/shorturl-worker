@@ -6,6 +6,7 @@ PromptFill 短網址服務 - 使用 Cloudflare Workers + KV
 
 - 建立短網址，存儲完整模板 JSON
 - 短網址重新導向到 PromptFill
+- CORS 圖片代理（繞過跨域限制）
 - Rate Limiting 防護（每 IP 每分鐘 10 次）
 - GitHub Actions 自動部署
 
@@ -132,6 +133,23 @@ GET /api/template/:code
 ```
 GET /s/:code  →  302 重新導向到 PromptFill/?id=code
 ```
+
+### CORS 圖片代理
+
+繞過跨域限制，代理取得外部圖片：
+
+```http
+GET /api/proxy?url=https://example.com/image.jpg
+```
+
+回應：
+- 原始圖片內容
+- 附加 CORS headers
+- 快取 1 天
+
+安全限制：
+- 僅允許 `yazelin.github.io` Origin
+- 只允許 http/https 協議
 
 ## 免費額度
 
