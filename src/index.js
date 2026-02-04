@@ -1,14 +1,20 @@
 /**
- * ShortURL Worker - PromptFill 模板分享服務
+ * ShortURL Worker - PromptFill 模板分享服務 + Image Bed 圖床代理
  *
  * 直接存儲模板 JSON 資料到 KV，不需要壓縮到 URL
  *
  * API:
- *   POST /api/short-url      - 建立短網址（存儲模板資料）
- *   GET  /api/template/:code - 取得模板資料
- *   GET  /api/proxy?url=...  - CORS 圖片代理
- *   GET  /s/:code            - 重定向到 PromptFill
+ *   POST /api/short-url        - 建立短網址（存儲模板資料）
+ *   GET  /api/template/:code   - 取得模板資料
+ *   GET  /api/proxy?url=...    - CORS 圖片代理
+ *   POST /api/upload-release   - GitHub Release 上傳代理（圖床用）
+ *   GET  /s/:code              - 重定向到 PromptFill
  */
+
+// 允許的圖床 Repo（安全限制）
+const ALLOWED_IMAGE_REPOS = [
+  'yazelin/image-bed',
+];
 
 // 允許的來源
 const ALLOWED_ORIGINS = [
@@ -87,6 +93,14 @@ export default {
       return handleProxy(request, url, origin);
     }
 
+    // POST /api/upload-release - GitHub Release 上傳代理（圖床用）
+    if (request.method === 'POST' && url.pathname === '/api/upload-release') {
+      if (!isAllowedOrigin(origin)) {
+        return jsonResponse({ error: 'Forbidden: Origin not allowed' }, 403, origin);
+      }
+      return handleUploadRelease(request, origin);
+    }
+
     // GET /s/:code - 重定向到 PromptFill
     if (url.pathname.startsWith('/s/')) {
       return handleRedirect(request, env, url);
@@ -95,12 +109,13 @@ export default {
     // GET / - 首頁狀態
     if (url.pathname === '/') {
       return jsonResponse({
-        service: 'PromptFill ShortURL',
+        service: 'PromptFill ShortURL + Image Bed Proxy',
         status: 'ok',
         endpoints: {
           create: 'POST /api/short-url',
           getTemplate: 'GET /api/template/:code',
           proxy: 'GET /api/proxy?url=...',
+          uploadRelease: 'POST /api/upload-release?repo=...&releaseId=...&filename=...&token=...',
           redirect: 'GET /s/:code'
         }
       }, 200, origin);
@@ -126,8 +141,8 @@ function handleCORS(origin) {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': allowedOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
     }
   });
@@ -288,6 +303,68 @@ async function handleProxy(request, url, origin) {
   } catch (err) {
     console.error('Proxy fetch error:', err);
     return new Response('Failed to fetch resource', { status: 502 });
+  }
+}
+
+/**
+ * GitHub Release 上傳代理 - 繞過 CORS 限制（圖床用）
+ */
+async function handleUploadRelease(request, origin) {
+  // Rate Limiting 檢查
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return jsonResponse({ error: 'Too many requests. Please try again later.' }, 429, origin);
+  }
+
+  try {
+    // 從 URL 參數取得 metadata
+    const url = new URL(request.url);
+    const repo = url.searchParams.get('repo');
+    const releaseId = url.searchParams.get('releaseId');
+    const filename = url.searchParams.get('filename');
+    const token = url.searchParams.get('token');
+
+    // 驗證必要參數
+    if (!repo || !releaseId || !filename || !token) {
+      return jsonResponse({ error: 'Missing required parameters: repo, releaseId, filename, token' }, 400, origin);
+    }
+
+    // 安全檢查：只允許特定 repo
+    if (!ALLOWED_IMAGE_REPOS.includes(repo)) {
+      return jsonResponse({ error: 'Forbidden: Repository not allowed' }, 403, origin);
+    }
+
+    // 取得檔案內容
+    const fileData = await request.arrayBuffer();
+    const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+
+    // 轉發到 GitHub
+    const uploadUrl = `https://uploads.github.com/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(filename)}`;
+
+    const githubRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${token}`,
+        'Content-Type': contentType,
+        'Content-Length': fileData.byteLength.toString(),
+      },
+      body: fileData,
+    });
+
+    // 回傳 GitHub 的回應
+    const responseData = await githubRes.json();
+
+    return new Response(JSON.stringify(responseData), {
+      status: githubRes.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': origin,
+      },
+    });
+
+  } catch (err) {
+    console.error('Upload release error:', err);
+    return jsonResponse({ error: 'Upload failed: ' + err.message }, 500, origin);
   }
 }
 
