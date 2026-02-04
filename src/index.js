@@ -348,6 +348,7 @@ async function handleDeleteAsset(request, url, origin) {
       headers: {
         'Authorization': `token ${token}`,
         'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'ImageBed-Worker/1.0',
       },
     });
 
@@ -362,9 +363,16 @@ async function handleDeleteAsset(request, url, origin) {
       });
     }
 
-    // 其他狀態
+    // 其他狀態 - 加入更多 debug 資訊
     const responseData = await githubRes.json().catch(() => ({}));
-    return new Response(JSON.stringify(responseData), {
+    return new Response(JSON.stringify({
+      ...responseData,
+      _debug: {
+        githubStatus: githubRes.status,
+        assetId,
+        repo
+      }
+    }), {
       status: githubRes.status,
       headers: {
         'Content-Type': 'application/json',
