@@ -101,6 +101,14 @@ export default {
       return handleUploadRelease(request, origin);
     }
 
+    // DELETE /api/delete-asset - GitHub Release 刪除代理（圖床用）
+    if (request.method === 'DELETE' && url.pathname === '/api/delete-asset') {
+      if (!isAllowedOrigin(origin)) {
+        return jsonResponse({ error: 'Forbidden: Origin not allowed' }, 403, origin);
+      }
+      return handleDeleteAsset(request, url, origin);
+    }
+
     // GET /s/:code - 重定向到 PromptFill
     if (url.pathname.startsWith('/s/')) {
       return handleRedirect(request, env, url);
@@ -116,6 +124,7 @@ export default {
           getTemplate: 'GET /api/template/:code',
           proxy: 'GET /api/proxy?url=...',
           uploadRelease: 'POST /api/upload-release?repo=...&releaseId=...&filename=...&token=...',
+          deleteAsset: 'DELETE /api/delete-asset?repo=...&assetId=...&token=...',
           redirect: 'GET /s/:code'
         }
       }, 200, origin);
@@ -141,7 +150,7 @@ function handleCORS(origin) {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': allowedOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
     }
@@ -303,6 +312,69 @@ async function handleProxy(request, url, origin) {
   } catch (err) {
     console.error('Proxy fetch error:', err);
     return new Response('Failed to fetch resource', { status: 502 });
+  }
+}
+
+/**
+ * GitHub Release Asset 刪除代理 - 繞過 CORS 限制（圖床用）
+ */
+async function handleDeleteAsset(request, url, origin) {
+  // Rate Limiting 檢查
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return jsonResponse({ error: 'Too many requests. Please try again later.' }, 429, origin);
+  }
+
+  try {
+    const repo = url.searchParams.get('repo');
+    const assetId = url.searchParams.get('assetId');
+    const token = url.searchParams.get('token');
+
+    // 驗證必要參數
+    if (!repo || !assetId || !token) {
+      return jsonResponse({ error: 'Missing required parameters: repo, assetId, token' }, 400, origin);
+    }
+
+    // 安全檢查：只允許特定 repo
+    if (!ALLOWED_IMAGE_REPOS.includes(repo)) {
+      return jsonResponse({ error: 'Forbidden: Repository not allowed' }, 403, origin);
+    }
+
+    // 轉發刪除請求到 GitHub
+    const deleteUrl = `https://api.github.com/repos/${repo}/releases/assets/${assetId}`;
+
+    const githubRes = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    // 204 = 成功刪除
+    if (githubRes.status === 204) {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': origin,
+        },
+      });
+    }
+
+    // 其他狀態
+    const responseData = await githubRes.json().catch(() => ({}));
+    return new Response(JSON.stringify(responseData), {
+      status: githubRes.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': origin,
+      },
+    });
+
+  } catch (err) {
+    console.error('Delete asset error:', err);
+    return jsonResponse({ error: 'Delete failed: ' + err.message }, 500, origin);
   }
 }
 
