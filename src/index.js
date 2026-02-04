@@ -363,16 +363,9 @@ async function handleDeleteAsset(request, url, origin) {
       });
     }
 
-    // 其他狀態 - 加入更多 debug 資訊
+    // 其他狀態
     const responseData = await githubRes.json().catch(() => ({}));
-    return new Response(JSON.stringify({
-      ...responseData,
-      _debug: {
-        githubStatus: githubRes.status,
-        assetId,
-        repo
-      }
-    }), {
+    return new Response(JSON.stringify(responseData), {
       status: githubRes.status,
       headers: {
         'Content-Type': 'application/json',
