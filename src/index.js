@@ -163,6 +163,25 @@ function handleCORS(origin) {
 /**
  * 建立短網址 - 存儲完整模板資料
  */
+// ====== D1 儲存層(2026-07 遷移:寫入走 D1+內容去重;KV 只留舊碼回退)======
+async function contentCode(content) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function getStored(env, code) {
+  const row = await env.DB.prepare('SELECT data, expires_at FROM shorturls WHERE code = ?').bind(code).first();
+  if (row) {
+    if (row.expires_at && row.expires_at < new Date().toISOString()) {
+      await env.DB.prepare('DELETE FROM shorturls WHERE code = ?').bind(code).run();
+      return null;
+    }
+    return row.data;
+  }
+  // 舊短碼回退(KV,自帶 TTL)
+  return env.URLS.get(code);
+}
+
 async function handleCreateShortUrl(request, env, url, origin) {
   // Rate Limiting 檢查
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -188,19 +207,28 @@ async function handleCreateShortUrl(request, env, url, origin) {
       return jsonResponse({ error: 'Missing required fields: template.name, template.content' }, 400, origin);
     }
 
-    // 生成唯一短碼
-    let code;
-    let attempts = 0;
-    const maxAttempts = 5;
-
-    do {
-      code = generateCode(6);
-      const existing = await env.URLS.get(code);
-      if (!existing) break;
-      attempts++;
-    } while (attempts < maxAttempts);
-
-    if (attempts >= maxAttempts) {
+    // 內容雜湊短碼:同內容永遠同碼(去重,省寫入與儲存)
+    const contentJson = body.app === 'line-chat-maker'
+      ? JSON.stringify(body.state)
+      : JSON.stringify({ template: body.template, banks: body.banks || {}, defaults: body.defaults || {} });
+    const fullHash = await contentCode(contentJson);
+    let code = null;
+    for (const len of [8, 12, 16]) {
+      const cand = fullHash.slice(0, len);
+      const row = await env.DB.prepare('SELECT data FROM shorturls WHERE code = ?').bind(cand).first();
+      if (!row) { code = cand; break; }
+      try {
+        const parsed = JSON.parse(row.data);
+        const stored = parsed.app === 'line-chat-maker'
+          ? JSON.stringify(parsed.state)
+          : JSON.stringify({ template: parsed.template, banks: parsed.banks || {}, defaults: parsed.defaults || {} });
+        if (stored === contentJson) {
+          // 內容相同:直接回舊碼,不重寫
+          return jsonResponse({ shortUrl: `${url.origin}/s/${cand}`, code: cand, expiresIn: '1 year', dedup: true }, 200, origin);
+        }
+      } catch {}
+    }
+    if (!code) {
       return jsonResponse({ error: 'Failed to generate unique code' }, 500, origin);
     }
 
@@ -214,10 +242,11 @@ async function handleCreateShortUrl(request, env, url, origin) {
       };
     }
 
-    // 存入 KV（保存 1 年）
-    await env.URLS.put(code, JSON.stringify(storedData), {
-      expirationTtl: 365 * 24 * 60 * 60
-    });
+    // 存入 D1(保存 1 年;寫入額度 10 萬/天,不再吃 KV 的 1 千/天)
+    const nowIso = new Date().toISOString();
+    const expIso = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.prepare('INSERT INTO shorturls (code, data, created_at, expires_at) VALUES (?, ?, ?, ?)')
+      .bind(code, JSON.stringify(storedData), nowIso, expIso).run();
 
     // 回傳短網址
     const shortUrl = `${url.origin}/s/${code}`;
@@ -244,7 +273,7 @@ async function handleGetTemplate(request, env, url, origin) {
     return jsonResponse({ error: 'Missing code' }, 400, origin);
   }
 
-  const data = await env.URLS.get(code);
+  const data = await getStored(env, code);
 
   if (!data) {
     return jsonResponse({ error: 'Template not found or expired' }, 404, origin);
@@ -268,8 +297,8 @@ async function handleRedirect(request, env, url) {
     return new Response('Missing code', { status: 400 });
   }
 
-  // 檢查資料是否存在
-  const data = await env.URLS.get(code);
+  // 檢查資料是否存在(D1 優先,KV 舊碼回退)
+  const data = await getStored(env, code);
 
   if (!data) {
     return new Response('Short URL not found or expired', { status: 404 });

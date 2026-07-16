@@ -9,3 +9,8 @@ compatibility_date = "2025-01-01"
 [[kv_namespaces]]
 binding = "URLS"
 id = "9dd6a1acb4544aba8e95bdbdc41cc1c4"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "k-rider-signups"
+database_id = "843337b7-ef58-4e6a-8e12-759e5d5b379c"
