@@ -24,6 +24,9 @@ const ALLOWED_ORIGINS = [
 // PromptFill 網址
 const PROMPTFILL_URL = 'https://yazelin.github.io/PromptFill/';
 
+// LINE 對話製造機網址
+const LINE_CHAT_MAKER_URL = 'https://yazelin.github.io/line-chat-maker/';
+
 // ====== Rate Limiting（記憶體方案）======
 const RATE_LIMIT = 10;          // 每個 IP 在時間窗口內最多請求次數
 const RATE_WINDOW_MS = 60000;   // 時間窗口：60 秒
@@ -170,8 +173,18 @@ async function handleCreateShortUrl(request, env, url, origin) {
   try {
     const body = await request.json();
 
-    // 驗證必要欄位
-    if (!body.template || !body.template.name || !body.template.content) {
+    // line-chat-maker 分享:存 {app, state}
+    let storedData = null;
+    if (body.app === 'line-chat-maker') {
+      if (!body.state || !Array.isArray(body.state.messages)) {
+        return jsonResponse({ error: 'Missing required fields: state.messages' }, 400, origin);
+      }
+      if (JSON.stringify(body.state).length > 2000000) {
+        return jsonResponse({ error: 'State too large (max 2MB)' }, 400, origin);
+      }
+      storedData = { app: 'line-chat-maker', state: body.state, createdAt: new Date().toISOString() };
+    } else if (!body.template || !body.template.name || !body.template.content) {
+      // 預設(PromptFill)驗證
       return jsonResponse({ error: 'Missing required fields: template.name, template.content' }, 400, origin);
     }
 
@@ -191,13 +204,15 @@ async function handleCreateShortUrl(request, env, url, origin) {
       return jsonResponse({ error: 'Failed to generate unique code' }, 500, origin);
     }
 
-    // 準備存儲的資料
-    const storedData = {
-      template: body.template,
-      banks: body.banks || {},
-      defaults: body.defaults || {},
-      createdAt: new Date().toISOString(),
-    };
+    // 準備存儲的資料(PromptFill 預設)
+    if (!storedData) {
+      storedData = {
+        template: body.template,
+        banks: body.banks || {},
+        defaults: body.defaults || {},
+        createdAt: new Date().toISOString(),
+      };
+    }
 
     // 存入 KV（保存 1 年）
     await env.URLS.put(code, JSON.stringify(storedData), {
@@ -260,8 +275,13 @@ async function handleRedirect(request, env, url) {
     return new Response('Short URL not found or expired', { status: 404 });
   }
 
-  // 重定向到 PromptFill，帶上 id 參數
-  const redirectUrl = `${PROMPTFILL_URL}?id=${code}`;
+  // 依 app 決定目的地(預設 PromptFill)
+  let target = PROMPTFILL_URL;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed.app === 'line-chat-maker') target = LINE_CHAT_MAKER_URL;
+  } catch {}
+  const redirectUrl = `${target}?id=${code}`;
   return Response.redirect(redirectUrl, 302);
 }
 
