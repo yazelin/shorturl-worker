@@ -8,7 +8,7 @@
  *   GET  /api/template/:code   - 取得模板資料
  *   GET  /api/proxy?url=...    - CORS 圖片代理
  *   POST /api/upload-release   - GitHub Release 上傳代理（圖床用）
- *   GET  /s/:code              - 重定向到 PromptFill
+ *   GET  /s/:code              - 重定向到對應的 app（PromptFill / line-chat-maker / glitch-music）
  */
 
 // 允許的圖床 Repo（安全限制）
@@ -26,6 +26,9 @@ const PROMPTFILL_URL = 'https://yazelin.github.io/PromptFill/';
 
 // LINE 對話製造機網址
 const LINE_CHAT_MAKER_URL = 'https://yazelin.github.io/line-chat-maker/';
+
+// glitch-music 網址（分享一首歌：點開就播，帶歌詞）
+const GLITCH_MUSIC_URL = 'https://yazelin.github.io/glitch-music/';
 
 // ====== Rate Limiting（記憶體方案）======
 const RATE_LIMIT = 10;          // 每個 IP 在時間窗口內最多請求次數
@@ -202,13 +205,24 @@ async function handleCreateShortUrl(request, env, url, origin) {
         return jsonResponse({ error: 'State too large (max 2MB)' }, 400, origin);
       }
       storedData = { app: 'line-chat-maker', state: body.state, createdAt: new Date().toISOString() };
+    } else if (body.app === 'glitch-music') {
+      // 分享一首歌:state 存曲目 metadata 與歌詞,音檔本身留在原本的網址
+      // (3 MB 的 mp3 不進資料庫,只存 src)
+      if (!body.state || !body.state.title || !body.state.src) {
+        return jsonResponse({ error: 'Missing required fields: state.title, state.src' }, 400, origin);
+      }
+      if (JSON.stringify(body.state).length > 200000) {
+        return jsonResponse({ error: 'State too large (max 200KB)' }, 400, origin);
+      }
+      storedData = { app: 'glitch-music', state: body.state, createdAt: new Date().toISOString() };
     } else if (!body.template || !body.template.name || !body.template.content) {
       // 預設(PromptFill)驗證
       return jsonResponse({ error: 'Missing required fields: template.name, template.content' }, 400, origin);
     }
 
     // 內容雜湊短碼:同內容永遠同碼(去重,省寫入與儲存)
-    const contentJson = body.app === 'line-chat-maker'
+    const isStateApp = body.app === 'line-chat-maker' || body.app === 'glitch-music';
+    const contentJson = isStateApp
       ? JSON.stringify(body.state)
       : JSON.stringify({ template: body.template, banks: body.banks || {}, defaults: body.defaults || {} });
     const fullHash = await contentCode(contentJson);
@@ -219,7 +233,8 @@ async function handleCreateShortUrl(request, env, url, origin) {
       if (!row) { code = cand; break; }
       try {
         const parsed = JSON.parse(row.data);
-        const stored = parsed.app === 'line-chat-maker'
+        const storedIsStateApp = parsed.app === 'line-chat-maker' || parsed.app === 'glitch-music';
+        const stored = storedIsStateApp
           ? JSON.stringify(parsed.state)
           : JSON.stringify({ template: parsed.template, banks: parsed.banks || {}, defaults: parsed.defaults || {} });
         if (stored === contentJson) {
@@ -309,6 +324,7 @@ async function handleRedirect(request, env, url) {
   try {
     const parsed = JSON.parse(data);
     if (parsed.app === 'line-chat-maker') target = LINE_CHAT_MAKER_URL;
+    else if (parsed.app === 'glitch-music') target = GLITCH_MUSIC_URL;
   } catch {}
   const redirectUrl = `${target}?id=${code}`;
   return Response.redirect(redirectUrl, 302);
