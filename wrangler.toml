@@ -2,6 +2,11 @@ name = "shorturl"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# 這把 API token 看得到兩個 Cloudflare 帳號，CI 是非互動模式選不出來，
+# 不指定就會失敗（2026-07-16 之後的第一次 push 才踩到）。
+# account_id 不是憑證，只是帳號代號。
+account_id = "986aa90dfb437b247dcb8e1819c9b525"
+
 # KV namespace - 只用來讀遷移前發出去的舊短碼（getStored 的回退路徑）。
 # 新的短碼一律寫進下面的 D1 shorturls 表，不要再往 KV 寫。
 
