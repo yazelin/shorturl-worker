@@ -2,9 +2,8 @@ name = "shorturl"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# KV namespace - 部署前需要先執行:
-# wrangler kv:namespace create "URLS"
-# 然後把得到的 id 填入下方
+# KV namespace - 只用來讀遷移前發出去的舊短碼（getStored 的回退路徑）。
+# 新的短碼一律寫進下面的 D1 shorturls 表，不要再往 KV 寫。
 
 [[kv_namespaces]]
 binding = "URLS"

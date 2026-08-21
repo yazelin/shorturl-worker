@@ -1,11 +1,13 @@
 # ShortURL Worker
 
-PromptFill 短網址服務 - 使用 Cloudflare Workers + KV
+PromptFill 短網址服務 - 使用 Cloudflare Workers + D1
+
+服務多個站台：PromptFill（匯入模板）、line-chat-maker（匯入對話）、glitch-music（播放一首歌）。
 
 ## 功能
 
-- 建立短網址，存儲完整模板 JSON
-- 短網址重新導向到 PromptFill
+- 建立短網址，存儲完整模板 JSON（或其他 app 的 state）
+- 短網址依 `app` 欄位重新導向到對應站台
 - CORS 圖片代理（繞過跨域限制）
 - Rate Limiting 防護（每 IP 每分鐘 10 次）
 - GitHub Actions 自動部署
